@@ -5,7 +5,7 @@ from teeiq.data_utils import clean_teetimes
 from teeiq.recs import low_fill_opportunities
 from teeiq.model import train_model, expected_utilization, dynamic_price_suggestion
 from teeiq.weather import fetch_daily_weather
-from teeiq.geo import geocode_address
+from teeiq.geo import geocode_candidates
 
 st.header("Pricing & AI (Combined)")
 
@@ -16,39 +16,40 @@ if "tee_df" not in st.session_state or st.session_state["tee_df"].empty:
 
 df = clean_teetimes(st.session_state["tee_df"])
 
-# -------- Location & Weather (Address → Weather) ----------
+# -------- Location & Weather (Address → Candidates → Weather) ----------
 with st.expander("Location & Weather (recommended)"):
-    addr = st.text_input("Course address (e.g., 'TPC Sawgrass, Ponte Vedra Beach, FL')")
+    addr = st.text_input("Course address, name, URL, or 'lat,lon' (e.g., 'TPC Sawgrass, Ponte Vedra Beach, FL' or '30.199,-81.394')")
     colA, colB = st.columns(2)
     with colA:
         start = st.date_input("Forecast start", value=date.today())
     with colB:
         end = st.date_input("Forecast end", value=date.today() + timedelta(days=6))
 
-    use_manual = st.checkbox("Or enter latitude/longitude manually")
+    weather_df = None
     lat = lon = None
 
-    if use_manual:
-        c1, c2 = st.columns(2)
-        with c1:
-            lat = st.number_input("Latitude", value=27.61570, format="%.5f")
-        with c2:
-            lon = st.number_input("Longitude", value=-80.38397, format="%.5f")
-    else:
-        if st.button("Lookup weather by address"):
-            coords = geocode_address(addr) if addr.strip() else None
-            if not coords:
-                st.error("Could not geocode that address (try a fuller name, e.g., 'TPC Sawgrass, Ponte Vedra Beach, FL').")
-            else:
-                lat, lon = coords
-                st.success(f"Geocoded: {lat:.5f}, {lon:.5f}")
-                st.session_state["geo_latlon"] = (lat, lon)
+    if st.button("Find course location"):
+        cands = geocode_candidates(addr.strip())
+        if not cands:
+            st.error("No geocoding results. Try adding the city/state, or paste a Google Maps link.")
+        else:
+            st.success(f"Found {len(cands)} location option(s). Choose one below.")
+            st.session_state["geo_candidates"] = cands
 
-    # Remember last successful geocode so user doesn’t have to click twice
-    if "geo_latlon" in st.session_state and not use_manual:
+    # If candidates exist, let user choose
+    if "geo_candidates" in st.session_state:
+        labels = [f"{name}  ({src})  [{lat:.5f}, {lon:.5f}]" for (name, lat, lon, src) in st.session_state["geo_candidates"]]
+        idx = st.selectbox("Select location", range(len(labels)), format_func=lambda i: labels[i]) if labels else None
+        if idx is not None and labels:
+            name, lat, lon, src = st.session_state["geo_candidates"][idx]
+            st.caption(f"Using: {name}  →  {lat:.5f}, {lon:.5f}")
+            st.session_state["geo_latlon"] = (lat, lon)
+
+    # Use last good lat/lon if set
+    if "geo_latlon" in st.session_state:
         lat, lon = st.session_state["geo_latlon"]
 
-    weather_df = None
+    # Weather fetch (optional)
     if (lat is not None) and (lon is not None):
         try:
             weather_df = fetch_daily_weather(lat, lon, start.isoformat(), end.isoformat())
@@ -56,7 +57,7 @@ with st.expander("Location & Weather (recommended)"):
                 st.caption("Weather preview")
                 st.dataframe(weather_df.head(), use_container_width=True)
             else:
-                st.info("No weather rows returned for that date range. Continuing without weather.")
+                st.info("No weather rows returned for that range. Continuing without weather.")
         except Exception as e:
             st.warning(f"Weather fetch failed: {e}. Continuing without weather.")
 
@@ -65,10 +66,10 @@ util_th = st.slider("Flag times below this utilization threshold", 0.3, 0.9, 0.6
 min_slots = st.number_input("Min slots per (weekday, hour) to consider", min_value=4, max_value=100, value=8, step=1)
 
 if st.button("Generate ONE pricing suggestion"):
-    # Rule-based opportunities
+    # Rule-based low-fill blocks
     opp = low_fill_opportunities(df, util_threshold=util_th, min_slots=min_slots)
 
-    # Predictive overlay (weather if available)
+    # Predictive overlay (if weather available)
     try:
         clf = train_model(df, weather_df)
         util_pred = expected_utilization(clf, df, weather_df)
@@ -78,11 +79,9 @@ if st.button("Generate ONE pricing suggestion"):
         enhanced = opp.copy()
         enhanced["expected_util"] = enhanced["util"]  # fallback without model
 
-    # Make final dynamic price recs based on predicted expected_util
+    # Final dynamic price suggestion (single top action)
     base = enhanced.rename(columns={"avg_price": "avg_price"})
     final = dynamic_price_suggestion(base[["weekday","hour","expected_util","avg_price"]])
-
-    # Rank by (lowest expected utilization first)
     final = final.sort_values(["expected_util","weekday","hour"]).reset_index(drop=True)
 
     if final.empty:
@@ -108,4 +107,3 @@ if st.button("Generate ONE pricing suggestion"):
             file_name="teeiq_dynamic_pricing.csv",
             mime="text/csv",
         )
-
