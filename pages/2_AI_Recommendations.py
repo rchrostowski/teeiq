@@ -29,3 +29,4 @@ else:
     st.download_button("Download recommendations CSV", data=csv_bytes, file_name="teeiq_recommendations.csv", mime="text/csv")
 
     st.info(f"Estimated monthly revenue lift (conservative): **${float(opp['est_monthly_lift'].sum()):,.0f}**")
+
