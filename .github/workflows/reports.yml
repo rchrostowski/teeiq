@@ -1,0 +1,45 @@
+name: weekly-reports
+on:
+  schedule:
+    - cron: '0 12 * * MON'  # Mondays 12:00 UTC
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Generate PDFs
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          COURSE_IDS: ${{ secrets.COURSE_IDS }}
+        run: |
+          python - << 'PY'
+from pathlib import Path
+import os
+from teeiq.persistence import load_teetimes
+from teeiq.analytics import kpis
+from teeiq.reports import make_weekly_pdf
+from datetime import datetime
+
+course_ids = os.getenv('COURSE_IDS','demo-course').split(',')
+Path('reports').mkdir(exist_ok=True)
+
+for cid in course_ids:
+    df = load_teetimes(cid)
+    if df.empty: 
+        continue
+    T,B,U,R,P = kpis(df)
+    metrics = {"Course": cid, "Utilization": f"{U*100:.1f}%", "Booked": B, "Revenue": f"${R:,.0f}", "Potential": f"${P:,.0f}"}
+    fname = Path('reports')/f"report_{cid}_{datetime.now().date()}.pdf"
+    make_weekly_pdf(metrics, str(fname))
+print('Reports generated.')
+PY
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-reports
+          path: reports/*.pdf
