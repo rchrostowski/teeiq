@@ -1,3 +1,8 @@
+
+---
+
+### `app.py`
+```python
 import streamlit as st
 import pandas as pd
 
@@ -38,4 +43,5 @@ else:
     c4.metric("Potential (open)", f"${potential:,.0f}")
 
     st.divider()
-    st.markdown("Use the **pages** in the left sidebar for: heatmap, AI recs, competitor benchmark, and reviews.")
+    st.markdown("Use the **pages** (left sidebar) for: Import/Save, Heatmap, AI Recs, Competitor Benchmark, Reviews, Predictive Pricing, and Reports.")
+
