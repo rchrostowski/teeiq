@@ -1,11 +1,24 @@
 import streamlit as st
 import pandas as pd
-
 from teeiq.data_utils import clean_teetimes
 from teeiq.analytics import kpis
 from teeiq.demo import make_demo_teetimes
 
 st.set_page_config(page_title="TeeIQ – Run your course like a hedge fund", page_icon="⛳", layout="wide")
+
+# --- Classy minimal styling (free) ---
+CSS = """
+<style>
+/* Elegant font stack */
+html, body, [class*="css"]  { font-family: ui-sans-serif, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; }
+h1, h2, h3, .metric-label { letter-spacing: .2px; }
+.small-muted { color:#9fb5a7; font-size:0.9rem; }
+.kpi-card { background: #0f201a; border:1px solid #1c3b2f; border-radius:16px; padding:18px; }
+hr { border-color:#183428; }
+</style>
+"""
+st.markdown(CSS, unsafe_allow_html=True)
+
 st.title("TeeIQ – Revenue Optimization Dashboard")
 st.caption("Run your course like a hedge fund.")
 
@@ -32,11 +45,10 @@ else:
 
     total, booked, util, revenue, potential = kpis(df)
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total Slots", f"{total:,}")
-    c2.metric("Booked", f"{booked:,}", f"{util*100:.1f}% util")
-    c3.metric("Revenue (booked)", f"${revenue:,.0f}")
-    c4.metric("Potential (open)", f"${potential:,.0f}")
+    with c1: st.container(border=False).markdown(f'<div class="kpi-card"><div class="metric-label">Total Slots</div><h3>{total:,}</h3></div>', unsafe_allow_html=True)
+    with c2: st.container(border=False).markdown(f'<div class="kpi-card"><div class="metric-label">Booked</div><h3>{booked:,} · {util*100:.0f}%</h3></div>', unsafe_allow_html=True)
+    with c3: st.container(border=False).markdown(f'<div class="kpi-card"><div class="metric-label">Revenue (booked)</div><h3>${revenue:,.0f}</h3></div>', unsafe_allow_html=True)
+    with c4: st.container(border=False).markdown(f'<div class="kpi-card"><div class="metric-label">Potential (open)</div><h3>${potential:,.0f}</h3></div>', unsafe_allow_html=True)
 
     st.divider()
-    st.markdown("Use the **pages** (left sidebar) for: Import/Save, Heatmap, AI Recs, Competitor Benchmark, Reviews, Predictive Pricing, and Reports.")
-
+    st.markdown("Use the **pages** (left sidebar) for: Import/Save, Heatmap, Pricing & AI (combined), Competitors, Reviews, Reports.")
