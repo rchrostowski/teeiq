@@ -19,3 +19,4 @@ def utilization_matrix(df: pd.DataFrame) -> pd.DataFrame:
 
 def daily_utilization(df: pd.DataFrame) -> pd.DataFrame:
     return df.groupby("date").agg(util=("booked","mean")).reset_index()
+
