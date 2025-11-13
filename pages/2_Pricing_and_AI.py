@@ -1,20 +1,12 @@
 import streamlit as st
 from datetime import date, timedelta
 import matplotlib.pyplot as plt
-import pandas as pd
 
-from teeiq.data_utils import clean_teetimes
+from teeiq.data_utils import clean_teetimes, fmt_time_ampm
 from teeiq.recs import low_fill_opportunities
 from teeiq.model import train_model, expected_utilization, dynamic_price_suggestion
 from teeiq.weather import fetch_daily_weather
 from teeiq.geo import geocode_address
-
-
-def fmt_time_ampm(h: int, m: int) -> str:
-    hh = h % 12 or 12
-    ampm = "AM" if h < 12 else "PM"
-    return f"{hh}:{m:02d}{ampm}"
-
 
 st.header("Pricing & AI (Combined)")
 
@@ -51,12 +43,11 @@ with st.expander("Location & Weather (type the street address)"):
             st.success(f"Geocoded: {lat:.5f}, {lon:.5f}")
             st.session_state["geo_latlon"] = (lat, lon)
 
-    # Remember last successful geocode
+    # Use last good coords if available
     if "geo_latlon" in st.session_state and (lat is None or lon is None):
         lat, lon = st.session_state["geo_latlon"]
 
-    # Manual fallback always available
-    st.markdown("**Manual fallback (optional):**")
+    # Manual fallback
     m1, m2 = st.columns(2)
     with m1:
         lat = st.number_input(
@@ -82,9 +73,8 @@ with st.expander("Location & Weather (type the street address)"):
                 st.info("No weather rows for that range. Continuing without weather.")
         except Exception as e:
             st.warning(f"Weather fetch failed: {e}. Continuing without weather.")
-else:
-    weather_df = None  # safety
-
+    else:
+        weather_df = None
 
 # -------- Tee-time interval + thresholds --------
 slot_minutes = st.selectbox(
@@ -109,10 +99,9 @@ min_slots = st.number_input(
     step=1,
 )
 
-
 # -------- Combined AI Rec + Predictive Pricing --------
 if st.button("Generate ONE pricing suggestion"):
-    # Slot-level opportunities at chosen interval
+    # Rule-based, slot-level opportunities
     opp = low_fill_opportunities(
         df,
         util_threshold=util_th,
@@ -120,56 +109,65 @@ if st.button("Generate ONE pricing suggestion"):
         slot_minutes=slot_minutes,
     )
 
-    # Predictive overlay (uses weather if available)
+    # Predictive overlay
     try:
         clf = train_model(df, weather_df, slot_minutes=slot_minutes)
         util_pred = expected_utilization(
-            clf, df, weather_df, slot_minutes=slot_minutes, by="slot"
+            clf, df, weather_df, slot_minutes=slot_minutes
         )
-        # merge predicted expected_util into opp
         enhanced = opp.merge(
-            util_pred[["weekday", "slot_index", "slot_label", "expected_util"]],
-            on=["weekday", "slot_index"],
+            util_pred[
+                [
+                    "weekday",
+                    "slot_index",
+                    "slot_label",
+                    "slot_hour",
+                    "slot_minute",
+                    "expected_util",
+                ]
+            ],
+            on=["weekday", "slot_index", "slot_label"],
             how="left",
             suffixes=("", "_pred"),
         )
         enhanced["expected_util"] = enhanced["expected_util"].fillna(enhanced["util"])
     except Exception:
         enhanced = opp.copy()
-        enhanced["expected_util"] = enhanced["util"]  # fallback
+        enhanced["slot_hour"] = enhanced["hour"]
+        enhanced["slot_minute"] = enhanced["minute"]
+        enhanced["expected_util"] = enhanced["util"]
 
-    # Compute final price suggestions (we already have avg_price in enhanced)
+    # Prepare for pricing suggestions
     enhanced = enhanced.rename(columns={"avg_price": "avg_price"})
-    final = dynamic_price_suggestion(
-        enhanced[
-            [
-                "weekday",
-                "slot_index",
-                "slot_label",
-                "hour",
-                "minute",
-                "expected_util",
-                "avg_price",
-            ]
-        ],
-        target=0.75,
-        price_col="avg_price",
-    ).copy()
+    util_for_pricing = enhanced[
+        [
+            "weekday",
+            "slot_index",
+            "slot_label",
+            "slot_hour",
+            "slot_minute",
+            "expected_util",
+            "avg_price",
+        ]
+    ].copy()
 
-    # merge back the discount & new_price with other fields
-    final = final.merge(
+    priced = dynamic_price_suggestion(
+        util_for_pricing, target=0.75, price_col="avg_price"
+    )
+
+    final = priced.merge(
         enhanced[
             [
                 "weekday",
                 "slot_index",
                 "slot_label",
-                "hour",
-                "minute",
+                "slot_hour",
+                "slot_minute",
                 "slots",
                 "booked",
             ]
         ],
-        on=["weekday", "slot_index", "slot_label", "hour", "minute"],
+        on=["weekday", "slot_index", "slot_label", "slot_hour", "slot_minute"],
         how="left",
     )
 
@@ -184,7 +182,8 @@ if st.button("Generate ONE pricing suggestion"):
         pretty = final.copy()
         pretty = pretty.rename(columns={"weekday": "Weekday"})
         pretty["Time"] = pretty.apply(
-            lambda r: fmt_time_ampm(int(r["hour"]), int(r["minute"])), axis=1
+            lambda r: fmt_time_ampm(int(r["slot_hour"]), int(r["slot_minute"])),
+            axis=1,
         )
         pretty["Expected Utilization"] = (
             pretty["expected_util"] * 100
@@ -209,16 +208,16 @@ if st.button("Generate ONE pricing suggestion"):
         top = final.iloc[0]
         st.subheader("Top Single Recommendation")
         st.markdown(
-            f"**Block:** {top['weekday']} @ {fmt_time_ampm(int(top['hour']), int(top['minute']))}  \n"
+            f"**Block:** {top['weekday']} @ {fmt_time_ampm(int(top['slot_hour']), int(top['slot_minute']))}  \n"
             f"**Expected Utilization:** {top['expected_util']*100:.2f}%  \n"
             f"**Average Price:** ${top['avg_price']:.2f}  \n"
             f"**Suggested Discount:** {(top['suggested_discount']*100):.2f}%  \n"
             f"**New Price:** ${top['new_price']:.2f}"
         )
+
         st.caption("One focused action to take right now. Full table below.")
         st.dataframe(pretty, use_container_width=True)
 
-        # CSV download
         st.download_button(
             "Download all suggestions (CSV)",
             data=pretty.to_csv(index=False).encode(),
@@ -226,15 +225,16 @@ if st.button("Generate ONE pricing suggestion"):
             mime="text/csv",
         )
 
-        # Simple bar chart: expected utilization by time
+        # Simple bar chart
         chart_df = final.copy()
         chart_df["Time"] = chart_df.apply(
-            lambda r: fmt_time_ampm(int(r["hour"]), int(r["minute"])), axis=1
+            lambda r: fmt_time_ampm(int(r["slot_hour"]), int(r["slot_minute"])),
+            axis=1,
         )
-        chart_df = chart_df.sort_values(["weekday", "slot_index"])
         fig, ax = plt.subplots(figsize=(10, 3))
         ax.bar(chart_df["Time"], chart_df["expected_util"] * 100)
         ax.set_ylabel("Expected Utilization (%)")
         ax.set_xlabel("Time of Day")
         ax.tick_params(axis="x", labelrotation=90)
         st.pyplot(fig, use_container_width=True)
+
