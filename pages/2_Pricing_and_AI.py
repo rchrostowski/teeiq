@@ -1,3 +1,17 @@
+import streamlit as st
+from datetime import date, timedelta
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# Import your TeeIQ logic modules
+from teeiq.data_utils import clean_teetimes, fmt_time_ampm
+from teeiq.recs import low_fill_opportunities
+from teeiq.model import train_model, expected_utilization, dynamic_price_suggestion
+from teeiq.weather import fetch_daily_weather
+from teeiq.geo import geocode_address
+
+
+
 # --- Add near the top of the page, before Generate button ---
 slot_minutes = st.selectbox(
     "Tee-time interval",
