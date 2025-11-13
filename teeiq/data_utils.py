@@ -51,3 +51,26 @@ def clean_teetimes(df: pd.DataFrame) -> pd.DataFrame:
 
     return df.sort_values("tee_time").reset_index(drop=True)
 
+import pandas as pd
+
+def add_time_bins(df: pd.DataFrame, slot_minutes: int = 10) -> pd.DataFrame:
+    """Create N-minute slots (labels + indices) from tee_time."""
+    df = df.copy()
+    dt = df["tee_time"]
+    minute_of_day = dt.dt.hour * 60 + dt.dt.minute
+    slot_index = (minute_of_day // slot_minutes).astype(int)
+    slot_start_min = slot_index * slot_minutes
+    slot_hour = (slot_start_min // 60).astype(int)
+    slot_min = (slot_start_min % 60).astype(int)
+    df["slot_index"] = slot_index
+    df["slot_minutes"] = slot_minutes
+    df["slot_label"] = slot_hour.astype(str).str.zfill(2) + ":" + slot_min.astype(str).str.zfill(2)
+    df["slot_time"] = pd.to_datetime(df["tee_time"].dt.date.astype(str) + " " + df["slot_label"])
+    return df
+
+def fmt_time_ampm(h: int, m: int) -> str:
+    hh = h % 12 or 12
+    ampm = "AM" if h < 12 else "PM"
+    return f"{hh}:{m:02d}{ampm}"
+
+
