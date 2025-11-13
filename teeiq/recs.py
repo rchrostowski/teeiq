@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from .data_utils import WEEK_ORDER, add_time_bins
 
+
 def low_fill_opportunities(
     df: pd.DataFrame,
     util_threshold: float = 0.6,
@@ -17,19 +18,20 @@ def low_fill_opportunities(
     - suggested_discount, new_price, expected_additional_bookings, est_monthly_lift
     """
     tmp = add_time_bins(df, slot_minutes=slot_minutes).copy()
-    tmp["weekday"] = pd.Categorical(tmp["weekday"], categories=WEEK_ORDER, ordered=True)
+    tmp["weekday"] = pd.Categorical(
+        tmp["weekday"], categories=WEEK_ORDER, ordered=True
+    )
 
     agg = tmp.groupby(["weekday", "slot_index", "slot_label"]).agg(
         slots=("booked", "size"),
         booked=("booked", "sum"),
         avg_price=("price", "mean"),
-        hour=("hour", "first"),
-        minute=("tee_time", lambda s: int(s.iloc[0].minute)),
+        hour=("slot_hour", "first"),
+        minute=("slot_minute", "first"),
     ).reset_index()
 
     agg["util"] = np.where(agg["slots"] > 0, agg["booked"] / agg["slots"], np.nan)
 
-    # filter low-fill
     opp = agg[(agg["slots"] >= min_slots) & (agg["util"] < util_threshold)].copy()
 
     target = 0.75
